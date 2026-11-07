@@ -12,7 +12,7 @@ const UNIT_OPTIONS = UNIT_KEYS.map((k) => [k, UNITS[k].name]);
 
 /* ========================= SALGADO ========================= */
 export function SalgadoDrawer({ item, onClose }) {
-  const { state, dispatch, toast } = useApp();
+  const { state, saveSalgado, deleteSalgado, toast } = useApp();
   const [f, setF] = useState(() => ({
     nome: item?.nome ?? '',
     categoria: item?.categoria ?? 'Frito',
@@ -23,16 +23,20 @@ export function SalgadoDrawer({ item, onClose }) {
     ficha: (item?.ficha ?? []).map((l) => ({ ...l, key: uid(), quantidade: String(l.quantidade) })),
   }));
   const [err, setErr] = useState({});
+  const [salvando, setSalvando] = useState(false);
   const set = (k) => (v) => setF((p) => ({ ...p, [k]: v }));
 
-  const ingOptions = [['', 'Selecione…'], ...state.ingredientes.map((i) => [i.id, i.nome])];
-  const ingById = (id) => state.ingredientes.find((i) => i.id === id);
+  const ingOptions = [['', 'Selecione…'], ...state.ingredientes.map((i) => [String(i.id), i.nome])];
+  const ingById = (id) => state.ingredientes.find((i) => String(i.id) === String(id));
 
   const setLine = (key, patch) =>
     setF((p) => ({ ...p, ficha: p.ficha.map((l) => (l.key === key ? { ...l, ...patch } : l)) }));
   const pickIngredient = (key, id) => {
     const ing = ingById(id);
-    setLine(key, { ingredienteId: id, unidade: ing ? (ing.unidade === 'kg' ? 'g' : ing.unidade === 'l' ? 'ml' : ing.unidade) : 'g' });
+    setLine(key, {
+      ingredienteId: id,
+      unidade: ing ? (ing.unidade === 'kg' ? 'g' : ing.unidade === 'l' ? 'ml' : ing.unidade) : 'g',
+    });
   };
 
   const build = () => ({
@@ -45,42 +49,66 @@ export function SalgadoDrawer({ item, onClose }) {
     tempoPreparo: toNumber(f.tempoPreparo),
     ficha: f.ficha
       .filter((l) => l.ingredienteId)
-      .map((l) => ({ ingredienteId: l.ingredienteId, quantidade: toNumber(l.quantidade), unidade: l.unidade })),
+      .map((l) => ({ ingredienteId: String(l.ingredienteId), quantidade: toNumber(l.quantidade), unidade: l.unidade })),
   });
 
   // Prévia em tempo real do custo (usa o mesmo motor de cálculo das telas de análise)
   const preview = useMemo(() => {
     const draft = build();
-    const others = state.salgados.filter((s) => s.id !== draft.id);
+    const others = state.salgados.filter((s) => String(s.id) !== String(draft.id));
     const { products } = computeModel({ ...state, salgados: [...others, draft] });
-    return products.find((p) => p.id === draft.id);
+    return products.find((p) => String(p.id) === String(draft.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [f, state]);
 
-  const submit = () => {
+  const submit = async () => {
     const e = {};
     const v = build();
     if (!v.nome) e.nome = 'Informe o nome do salgado.';
     if (!(v.rendimento > 0)) e.rendimento = 'Informe quantas unidades o lote rende.';
     if (!(v.preco > 0)) e.preco = 'Informe o preço unitário.';
-    if (f.ficha.some((l) => l.ingredienteId && !(toNumber(l.quantidade) > 0))) e.ficha = 'Toda linha da ficha precisa de quantidade.';
+    if (f.ficha.some((l) => l.ingredienteId && !(toNumber(l.quantidade) > 0))) {
+      e.ficha = 'Toda linha da ficha precisa de quantidade.';
+    }
     setErr(e);
     if (Object.keys(e).length) return;
-    dispatch({ type: 'SAVE_SALGADO', value: v });
-    toast(item ? 'Salgado atualizado' : 'Salgado cadastrado');
-    onClose();
+
+    setSalvando(true);
+    try {
+      await saveSalgado(v);
+      toast(item ? 'Salgado atualizado no backend' : 'Salgado cadastrado no backend');
+      onClose();
+    } catch (errApi) {
+      setErr({ geral: errApi.message || 'Erro ao salvar produto no backend.' });
+    } finally {
+      setSalvando(false);
+    }
   };
 
-  const remove = () => {
+  const remove = async () => {
     if (window.confirm(`Excluir "${item.nome}"?`)) {
-      dispatch({ type: 'DELETE_SALGADO', id: item.id });
-      toast('Salgado excluído');
-      onClose();
+      setSalvando(true);
+      try {
+        await deleteSalgado(item.id);
+        toast('Salgado excluído');
+        onClose();
+      } catch (errApi) {
+        setErr({ geral: errApi.message || 'Erro ao excluir produto no backend.' });
+      } finally {
+        setSalvando(false);
+      }
     }
   };
 
   return (
-    <Drawer title={item ? 'Editar salgado' : 'Salgado novo'} onClose={onClose} onSubmit={submit} onDelete={item && remove}>
+    <Drawer
+      title={item ? 'Editar salgado' : 'Salgado novo'}
+      onClose={onClose}
+      onSubmit={submit}
+      onDelete={item && remove}
+      loading={salvando}
+    >
+      {err.geral && <div className="error" style={{ marginBottom: 12 }}>{err.geral}</div>}
       <TextInput label="Nome do salgado" value={f.nome} onChange={set('nome')} error={err.nome} />
       <div className="grid-2">
         <SelectInput label="Categoria" value={f.categoria} onChange={set('categoria')} options={CATEGORIAS.map((c) => [c, c])} />
@@ -107,8 +135,12 @@ export function SalgadoDrawer({ item, onClose }) {
         );
       })}
       {err.ficha && <span className="error">{err.ficha}</span>}
-      <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-start' }}
-        onClick={() => setF((p) => ({ ...p, ficha: [...p.ficha, { key: uid(), ingredienteId: '', quantidade: '', unidade: 'g' }] }))}>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm"
+        style={{ alignSelf: 'flex-start' }}
+        onClick={() => setF((p) => ({ ...p, ficha: [...p.ficha, { key: uid(), ingredienteId: '', quantidade: '', unidade: 'g' }] }))}
+      >
         <PlusIcon /> Adicionar ingrediente
       </button>
 
@@ -132,7 +164,7 @@ export function SalgadoDrawer({ item, onClose }) {
 
 /* ========================= INGREDIENTE ========================= */
 export function IngredienteDrawer({ item, onClose }) {
-  const { state, dispatch, toast } = useApp();
+  const { state, saveIngrediente, deleteIngrediente, toast } = useApp();
   const [f, setF] = useState(() => ({
     nome: item?.nome ?? '',
     unidade: item?.unidade ?? 'kg',
@@ -141,20 +173,22 @@ export function IngredienteDrawer({ item, onClose }) {
     fornecedor: item?.fornecedor ?? '',
   }));
   const [err, setErr] = useState({});
+  const [salvando, setSalvando] = useState(false);
   const set = (k) => (v) => setF((p) => ({ ...p, [k]: v }));
 
   const perBase = costPerBase({ unidade: f.unidade, quantidade: f.quantidade, custo: f.custo });
 
-  const submit = () => {
+  const submit = async () => {
     const e = {};
     if (!f.nome.trim()) e.nome = 'Informe o nome do ingrediente.';
     if (!(toNumber(f.quantidade) > 0)) e.quantidade = 'Informe a quantidade da embalagem.';
     if (!(toNumber(f.custo) > 0)) e.custo = 'Informe o custo.';
     setErr(e);
     if (Object.keys(e).length) return;
-    dispatch({
-      type: 'SAVE_INGREDIENTE',
-      value: {
+
+    setSalvando(true);
+    try {
+      await saveIngrediente({
         id: item?.id ?? uid(),
         nome: f.nome.trim(),
         unidade: f.unidade,
@@ -162,26 +196,44 @@ export function IngredienteDrawer({ item, onClose }) {
         custo: toNumber(f.custo),
         fornecedor: f.fornecedor.trim(),
         atualizadoEm: item?.atualizadoEm,
-      },
-    });
-    toast(item ? 'Ingrediente atualizado — receitas recalculadas' : 'Ingrediente cadastrado');
-    onClose();
+      });
+      toast(item ? 'Ingrediente atualizado no backend — receitas recalculadas' : 'Ingrediente cadastrado no backend');
+      onClose();
+    } catch (errApi) {
+      setErr({ geral: errApi.message || 'Erro ao salvar ingrediente no backend.' });
+    } finally {
+      setSalvando(false);
+    }
   };
 
-  const remove = () => {
-    const used = state.salgados.filter((s) => s.ficha.some((l) => l.ingredienteId === item.id)).length;
+  const remove = async () => {
+    const used = state.salgados.filter((s) => s.ficha.some((l) => String(l.ingredienteId) === String(item.id))).length;
     const msg = used
       ? `"${item.nome}" é usado em ${used} ficha(s) técnica(s) e será removido delas. Excluir?`
       : `Excluir "${item.nome}"?`;
     if (window.confirm(msg)) {
-      dispatch({ type: 'DELETE_INGREDIENTE', id: item.id });
-      toast('Ingrediente excluído');
-      onClose();
+      setSalvando(true);
+      try {
+        await deleteIngrediente(item.id);
+        toast('Ingrediente excluído');
+        onClose();
+      } catch (errApi) {
+        setErr({ geral: errApi.message || 'Erro ao excluir ingrediente no backend.' });
+      } finally {
+        setSalvando(false);
+      }
     }
   };
 
   return (
-    <Drawer title={item ? 'Editar ingrediente' : 'Ingrediente novo'} onClose={onClose} onSubmit={submit} onDelete={item && remove}>
+    <Drawer
+      title={item ? 'Editar ingrediente' : 'Ingrediente novo'}
+      onClose={onClose}
+      onSubmit={submit}
+      onDelete={item && remove}
+      loading={salvando}
+    >
+      {err.geral && <div className="error" style={{ marginBottom: 12 }}>{err.geral}</div>}
       <TextInput label="Nome do ingrediente" value={f.nome} onChange={set('nome')} error={err.nome} />
       <div className="grid-2">
         <SelectInput label="Unidade de medida" value={f.unidade} onChange={set('unidade')} options={UNIT_OPTIONS} />
@@ -230,8 +282,8 @@ export function CustoDrawer({ item, onClose }) {
         tipo: f.tipo.trim(),
         natureza: f.natureza,
         modoValor: f.natureza === 'fixo' ? 'valor' : f.modoValor,
-        valor: toNumber(f.valor),
         diaVencimento: dia || 1,
+        valor: toNumber(f.valor),
       },
     });
     toast(item ? 'Custo atualizado' : 'Custo cadastrado');

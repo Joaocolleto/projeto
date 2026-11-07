@@ -13,10 +13,12 @@ const NAV = [
 ];
 
 export default function Shell() {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const { toastMsg } = useApp();
   const nav = useNavigate();
   const { pathname } = useLocation();
+
+  const nomeUsuario = typeof user === 'string' ? user : user?.nome || 'Usuário';
 
   return (
     <>
@@ -27,7 +29,12 @@ export default function Shell() {
             <NavLink key={to} to={to} end={end}>{label}</NavLink>
           ))}
         </nav>
-        <button className="logout" onClick={logout}>Sair</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: '0.85rem', color: 'var(--ink-soft)' }} title={`Perfil: ${user?.cargo || 'GESTOR'}`}>
+            {nomeUsuario}
+          </span>
+          <button className="logout" onClick={logout}>Sair</button>
+        </div>
       </header>
 
       <Outlet />

@@ -5,14 +5,15 @@ import { computeModel } from '../lib/calc';
 import { brl, num, pct } from '../lib/format';
 
 export default function Precificacao() {
-  const { state, dispatch, toast } = useApp();
+  const { state, applyPrice, toast } = useApp();
   const { products } = useMemo(() => computeModel(state), [state]);
   const baixos = products.filter((p) => p.abaixoMinimo);
   const round = (n) => Math.ceil(n * 20) / 20; // arredonda p/ cima em múltiplos de R$ 0,05
 
-  const apply = (p) => {
-    dispatch({ type: 'APPLY_PRICE', id: p.id, preco: round(p.precoSugerido) });
-    toast(`Preço de ${p.nome} atualizado`);
+  const apply = async (p) => {
+    const novoPreco = round(p.precoSugerido);
+    await applyPrice(p.id, novoPreco);
+    toast(`Preço de ${p.nome} atualizado para ${brl(novoPreco)}`);
   };
 
   return (

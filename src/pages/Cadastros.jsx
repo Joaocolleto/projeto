@@ -25,18 +25,22 @@ function Row({ title, sub, badge, price, onEdit, editLabel }) {
   );
 }
 
-/** Preço do ingrediente editável direto na lista (atualização rápida de custo). */
+/** Preço do ingrediente editável direto na lista (atualização rápida de custo integrada à API). */
 function QuickPrice({ ing }) {
-  const { dispatch, toast } = useApp();
+  const { saveIngrediente, toast } = useApp();
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState('');
 
-  const save = () => {
+  const save = async () => {
     const n = toNumber(val);
     setEditing(false);
     if (n > 0 && n !== ing.custo) {
-      dispatch({ type: 'SAVE_INGREDIENTE', value: { ...ing, custo: n } });
-      toast(`${ing.nome} atualizado — receitas recalculadas`);
+      try {
+        await saveIngrediente({ ...ing, custo: n });
+        toast(`${ing.nome} atualizado — receitas recalculadas`);
+      } catch (err) {
+        toast(`Erro ao atualizar preço: ${err.message}`);
+      }
     }
   };
 
@@ -69,7 +73,7 @@ function QuickPrice({ ing }) {
 }
 
 export default function Cadastros() {
-  const { state } = useApp();
+  const { state, conectadoApi, carregandoApi, carregarDadosApi } = useApp();
   const [params, setParams] = useSearchParams();
   const aba = TABS.some((t) => t[0] === params.get('aba')) ? params.get('aba') : 'salgados';
   const [editing, setEditing] = useState(null); // { item } — item null = novo
@@ -80,9 +84,28 @@ export default function Cadastros() {
 
   return (
     <main className="page">
-      <div className="page-head">
-        <h1>Cadastros</h1>
-        <p className="page-sub">Gerencie os itens que alimentam o cálculo de custo e precificação</p>
+      <div className="page-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1>Cadastros</h1>
+          <p className="page-sub">Gerencie os itens que alimentam o cálculo de custo e precificação</p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span
+            className={`badge badge-${conectadoApi ? 'ok' : 'neutral'}`}
+            title={conectadoApi ? 'Conectado à API do backend' : 'Modo offline ou sem conexão'}
+          >
+            {conectadoApi ? '● API Conectada' : '○ Dados Locais'}
+          </span>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={carregarDadosApi}
+            disabled={carregandoApi}
+            title="Sincronizar com o backend"
+          >
+            {carregandoApi ? 'Sincronizando...' : '↻ Sincronizar'}
+          </button>
+        </div>
       </div>
 
       <div className="tabs-row">
@@ -110,7 +133,7 @@ export default function Cadastros() {
           <Row
             key={s.id}
             title={s.nome}
-            sub={`${s.categoria} · rendeu ${num(s.rendimento)} unidades`}
+            sub={`${s.categoria} · rendeu ${num(s.rendimento)} unidades${s.ativo === false ? ' · (Inativo)' : ''}`}
             price={<span className="row-price">{brl(s.preco)}</span>}
             onEdit={() => setEditing({ item: s })}
             editLabel={`Editar ${s.nome}`}
